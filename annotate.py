@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 import argparse
 import pathlib
-from collections import defaultdict
 from types import SimpleNamespace
 from typing import List
 
@@ -11,7 +10,6 @@ import numpy as np
 import ultralytics.utils.ops
 import yaml
 from timecode import Timecode
-from tqdm import tqdm
 from ultralytics.engine.results import Boxes
 from ultralytics.utils.metrics import bbox_ioa
 
@@ -31,7 +29,7 @@ def run(args):
     if len(args.source) == 1 and args.source[0].is_dir():
         player = PhotoPlayer(args.source[0], args.paused)
     else:
-        player = BufferedVideoPlayer(args.source, args.paused)
+        player = BufferedVideoPlayer(args.source, args.paused, crop=args.crop)
 
     # Load all annotations
     store = SQLiteAnnotationStore(args.project / 'annotations.db')
@@ -425,6 +423,7 @@ def parse_opt():
                         help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--detection-model', type=str, default='detection',
                         help='Only display detections from this source')
+    parser.add_argument('--crop', type=int, nargs=4, default=None, help="display area x y w h")
 
     opt = parser.parse_args()
 

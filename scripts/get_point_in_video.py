@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import pathlib
 
 import cv2
@@ -23,6 +24,8 @@ def get_coordinates(event, x, y, flags, param):
         start_y = y
     elif event == cv2.EVENT_LBUTTONUP:
         rect = (start_x, start_y, x, y)
+        # Standardize the rectangle coordinates
+        rect = (min(rect[0], rect[2]), min(rect[1], rect[3]), max(rect[0], rect[2]), max(rect[1], rect[3]))
         print(f"Crop: {rect[2] - rect[0]}:{rect[3] - rect[1]}, {rect[0]}:{rect[1]}")
         # Calculate next power of 2
         width = 2 ** (rect[2] - rect[0]).bit_length()

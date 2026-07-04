@@ -23,5 +23,9 @@ dependencies = [
     "torchreid",
     "torchvision==0.17.0",
     "tqdm",
-    "ultralytics==8.2.0"
+    "ultralytics==8.2.0",
 ]
+
+[tool.setuptools.packages.find]
+include = ["visual_race_timing*"]
+exclude = ["data*", "vendor*", "scripts*"]
