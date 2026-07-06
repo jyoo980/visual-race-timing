@@ -79,7 +79,7 @@ def draw_annotation(
                     txt_color = (255, 255, 255)
                 label = (f"{name} {conf:.2f}" if conf else name)
                 box = d.xyxyxyxy.reshape(-1, 4, 2).squeeze() if is_obb else d.xyxy.squeeze()
-                annotator.box_label(box, label, color=color, txt_color=txt_color, rotated=is_obb)
+                annotator.box_label(box, label, color=color, txt_color=txt_color)
 
         # Plot Pose results
         if keypoints is not None:

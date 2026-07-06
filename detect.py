@@ -24,9 +24,7 @@ from visual_race_timing.media_player import DisplayWindow
 def run(args):
     display_window = DisplayWindow("Race Timing")
     display_window.start()
-    yolo = YOLO(
-        args.yolo_model if 'yolov8' in str(args.yolo_model) else 'yolov8n.pt',
-    )
+    yolo = YOLO(args.detection_model)
     # Load race configuration from yaml
     race_config = args.project / 'config.yaml'
     with open(race_config, "r") as f:
@@ -49,7 +47,7 @@ def run(args):
     store = SQLiteAnnotationStore(Path(f"{args.project}/{args.name}/annotations.db"))
     if args.continue_exp:
         # Look in the save directory for the last frame
-        last_frame = store.get_last_frame(args.yolo_model.stem)
+        last_frame = store.get_last_frame(args.detection_model.stem)
         if last_frame != 0:
             args.seek_timecode_frame = last_frame
 
@@ -114,7 +112,7 @@ def run(args):
                 display_window.img_queue.put(img, block=False)
             if args.crop:
                 boxes, keypoints = offset_with_crop(boxes, keypoints, args.crop, loader._source_dims[0])
-            store.save_annotation(timecode_frame, boxes, keypoints, crossings, source=args.yolo_model.stem,
+            store.save_annotation(timecode_frame, boxes, keypoints, crossings, source=args.detection_model.stem,
                                   replace=True)
 
 
@@ -122,7 +120,7 @@ def parse_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('project', type=Path, default=pathlib.Path('data/exp'),
                         help='save results to project')
-    parser.add_argument('--yolo-model', type=Path, default='yolov8n',
+    parser.add_argument('--detection-model', type=Path, default='yolo26n',
                         help='yolo model path')
     # We depend on video files with timecode metadata. Hacking required to support other sources.
     parser.add_argument('--source', type=pathlib.Path, nargs='+',
