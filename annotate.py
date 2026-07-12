@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from typing import List
 
 import cv2
-import joblib
 import numpy as np
 import ultralytics.utils.ops
 import yaml
@@ -15,6 +14,7 @@ from ultralytics.utils.metrics import bbox_ioa
 
 from visual_race_timing.annotations import SQLiteAnnotationStore
 from visual_race_timing.drawing import draw_annotation
+from visual_race_timing.reid_bank import ReIDBank, build_extractor
 
 from visual_race_timing.geometry import line_segment_to_box_distance
 from visual_race_timing.prompts import ask_for_id
@@ -41,10 +41,14 @@ def run(args):
         cfg = SimpleNamespace(**cfg)  # easier dict access by dot, instead of ['']
     cfg.match_thresh = .8
 
-    if (args.project / 'tracker.pkl').is_file():
-        tracker = joblib.load(args.project / 'tracker.pkl')
-    else:
-       logger.warning(f'No tracker found, initializing from scratch.')
+    # ReID feature bank for the manual click->ID path (replaces tracker.pkl).
+    reid_weights = args.reid_model if pathlib.Path(args.reid_model).is_file() else None
+    reid_extractor = build_extractor(reid_weights, device=args.device, half=False)
+    bank = ReIDBank.load(args.project / 'reid_bank.npz', reid_extractor)
+
+    # NOTE: the interactive "(" / ")" tracking block still references `tracker`
+    # and is intentionally left broken until Step 2 re-hosts it on boxmot BotSort.
+    tracker = None
     # Load race configuration from yaml
     race_config = args.project / 'config.yaml'
     with open(race_config, "r") as f:
@@ -92,18 +96,19 @@ def run(args):
             logger.info("Box too small, ignoring.")
             return False
         else:
-            tracker.update_participant_features(player._last_frame_img, new_box, runner_id)
+            bank.update(player._last_frame_img, new_box, runner_id)
         return True
 
     def calculate_reid_distances(box, exclude: List[int] = []):
         new_box = np.atleast_2d(box)
-        candidate_participants, emb_dists = tracker.guess_id(player._last_frame_img, new_box)
+        candidate_participants, emb_dists = bank.guess(player._last_frame_img, new_box)
 
-        for ex in exclude:
-            if ex in candidate_participants:
-                emb_dists[candidate_participants.index(ex)] = np.inf
-        emb_dist_ranking = np.argsort(emb_dists[:, 0])
-        return list(emb_dists[emb_dist_ranking, 0]), list(np.array(candidate_participants)[emb_dist_ranking])
+        # Drop excluded ids, then return (distances, ids) ranked closest-first.
+        paired = [(d, i) for d, i in zip(emb_dists, candidate_participants) if i not in exclude]
+        paired.sort(key=lambda x: x[0])
+        dists = [d for d, _ in paired]
+        ids = [i for _, i in paired]
+        return dists, ids
 
     def query_for_reid(emb_dists, candidate_participants):
         bibs = [format(part_id, '02x').lower() for part_id in candidate_participants]
@@ -403,8 +408,8 @@ def run(args):
     player.key_delegate = key_delegate
     player.play()
     cv2.waitKey(0)
-    logger.info("Saving tracker state...")
-    joblib.dump(tracker, args.project / 'tracker.pkl')
+    logger.info("Saving reid bank...")
+    bank.save(args.project / 'reid_bank.npz')
 
 
 def parse_opt():

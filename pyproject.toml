@@ -5,7 +5,7 @@ description = "Vision-assisted annotation of runners' laps"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "boxmot",
+    "boxmot==22.0.0",
     "exif",
     "ffmpeg-python",
     "filterpy",

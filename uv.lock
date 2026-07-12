@@ -1638,7 +1638,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "boxmot" },
+    { name = "boxmot", specifier = "==22.0.0" },
     { name = "exif" },
     { name = "ffmpeg-python" },
     { name = "filterpy" },
