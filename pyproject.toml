@@ -5,6 +5,7 @@ description = "Vision-assisted annotation of runners' laps"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "boxmot",
     "exif",
     "ffmpeg-python",
     "filterpy",
@@ -12,16 +13,14 @@ dependencies = [
     "iteround",
     "joblib",
     "lapx",
-    "numpy<2.0.0",
     "prompt_toolkit",
     "pyyaml",
     "sortedcontainers",
     "tabulate",
     "tensorboard",
     "timecode",
-    "torch==2.2.0",
-    "torchreid",
-    "torchvision==0.17.0",
+    "torch",
+    "torchvision",
     "tqdm",
     "ultralytics==8.4.89",
 ]
