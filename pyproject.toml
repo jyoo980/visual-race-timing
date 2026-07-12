@@ -3,26 +3,20 @@ name = "visual-race-timing"
 version = "0.1.0"
 description = "Vision-assisted annotation of runners' laps"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "boxmot==22.0.0",
     "exif",
-    "ffmpeg-python",
-    "filterpy",
-    "gdown",
     "iteround",
     "joblib",
-    "lapx",
     "prompt_toolkit",
     "pyyaml",
     "sortedcontainers",
     "tabulate",
-    "tensorboard",
     "timecode",
     "torch",
-    "torchvision",
     "tqdm",
-    "ultralytics==8.4.89",
+    "ultralytics==8.4.93",
 ]
 
 [tool.setuptools.packages.find]
