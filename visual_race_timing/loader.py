@@ -99,8 +99,14 @@ class ImageLoader(Loader):
         return paths, imgs, info
 
     def __len__(self):
-        """Returns the number of batches in the object."""
+        """Returns the total number of batches in the object."""
         return math.ceil(len(self.time_to_path) / self.bs)  # number of files
+
+    @property
+    def remaining_batches(self):
+        """Returns the number of batches remaining, accounting for any seek."""
+        remaining_files = max(len(self.time_to_path) - self.source_index, 0)
+        return math.ceil(remaining_files / self.bs)
 
     def get_image_dims(self):
         return self._source_dims[0]
@@ -365,9 +371,15 @@ class VideoLoader(Loader):
         self.seek_timecode(target_timecode)
 
     def __len__(self):
-        """Returns the number of batches in the object."""
+        """Returns the total number of batches in the object."""
         total_frames = sum(self._frame_lengths) + sum(self.gaps)
         return math.ceil(total_frames / self.bs)
+
+    @property
+    def remaining_batches(self):
+        """Returns the number of batches remaining, accounting for any seek."""
+        total_frames = sum(self._frame_lengths) + sum(self.gaps)
+        return math.ceil(max(total_frames - self._current_frame, 0) / self.bs)
 
 
 class FFmpegVideoLoader(Loader):
@@ -662,9 +674,15 @@ class FFmpegVideoLoader(Loader):
         return self
 
     def __len__(self):
-        """Returns the number of batches in the object"""
+        """Returns the total number of batches in the object"""
         total_frames = sum(self._frame_lengths) + sum(self.gaps)
         return math.ceil(total_frames / self.frames_to_stride)
+
+    @property
+    def remaining_batches(self):
+        """Returns the number of batches remaining, accounting for any seek."""
+        total_frames = sum(self._frame_lengths) + sum(self.gaps)
+        return math.ceil(max(total_frames - self._current_frame, 0) / self.frames_to_stride)
 
     def __del__(self):
         """Cleanup FFmpeg process"""

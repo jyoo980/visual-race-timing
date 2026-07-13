@@ -71,7 +71,7 @@ def run(args):
     elif args.seek_timecode_frame:
         loader.seek_timecode_frame(args.seek_timecode_frame)
 
-    for source, images, metadata in tqdm.tqdm(loader, total=len(loader)):
+    for source, images, metadata in tqdm.tqdm(loader, total=loader.remaining_batches):
         results = yolo.predict(source=images,
                                conf=args.conf,
                                iou=args.iou,
@@ -182,6 +182,8 @@ def parse_opt():
 
     opt = parser.parse_args()
     assert opt.seek_frame is None or opt.seek_timecode_frame is None, "Cannot set both seek_frame and seek_timecode_frame"
+    assert not opt.continue_exp or (opt.seek_frame is None and opt.seek_time is None and opt.seek_timecode_frame is None), \
+        "Cannot combine --continue-exp with --seek-frame, --seek-time, or --seek-timecode-frame"
     return opt
 
 
