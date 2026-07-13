@@ -210,8 +210,9 @@ class VideoLoader(Loader):
                         f"Reached end of video {path} at frame {self._source_frame + self.gap_offset}."))
                 end_of_source_frame = (self._timecodes[next_frame_source] + self._frame_lengths[next_frame_source] -
                                        self._timecodes[0]).frames
+                # For the last source there is no next video to bound the gap, so treat the window as empty
                 start_of_next_source_frame = self._timecodes[next_frame_source + 1].frames - self._timecodes[
-                    0].frames if next_frame_source + 1 < self.num_sources else float('inf')
+                    0].frames if next_frame_source + 1 < self.num_sources else end_of_source_frame
                 # Current frame is the true index which tells us if we are in a gap or not. If we go forward, what's our new offset?
                 if end_of_source_frame <= next_frame < start_of_next_source_frame:
                     # For gap frames, we need to manually set the position to the last frame of the current source
