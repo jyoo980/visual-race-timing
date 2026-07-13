@@ -148,7 +148,7 @@ def parse_opt():
     parser.add_argument('--iou', type=float, default=0.5,
                         help='intersection over union (IoU) threshold for NMS')
     parser.add_argument('--device', default='cuda',
-                        help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+                        help='device to run on, e.g. cuda, 0, 0,1,2,3, cpu, or mps (Apple Silicon)')
     parser.add_argument('--show', action='store_true',
                         help='display tracking video results')
     parser.add_argument('--save', action='store_true',

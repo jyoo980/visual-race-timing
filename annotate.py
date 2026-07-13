@@ -443,7 +443,7 @@ def parse_opt():
                         help='reid model path, or a name boxmot auto-downloads, e.g. one of: '
                              + ', '.join(available_reid_models()))
     parser.add_argument('--device', default='cuda',
-                        help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+                        help='device to run on, e.g. cuda, 0, 0,1,2,3, cpu, or mps (Apple Silicon)')
     parser.add_argument('--detection-model', type=str, default='detection',
                         help='Only display detections from this source')
     parser.add_argument('--crop', type=int, nargs=4, default=None, help="display area x y w h")

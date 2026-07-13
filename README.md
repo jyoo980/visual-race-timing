@@ -9,6 +9,16 @@ substantially on Ultralytics and yolo_tracking codebases, from which we inherit 
 * Runner re-identification to help you keep track of who's who
 * Lap time collation and results output
 
+## Installation
+
+This project uses [uv](https://docs.astral.sh/uv/) for dependency management. Install locally with:
+
+```
+uv sync
+```
+
+Run scripts with `uv run <script>.py`, or activate the environment via `uv venv`/`source .venv/bin/activate`.
+
 ## Usage
 
 1. Record a video of the lap line. The video needs to have timecode metadata
@@ -22,8 +32,7 @@ files. The project directory is specified as the first argument to each script.
 
 ### Recording a video
 
-Aim for an elevated, static perspective of the finish line. 30fps/1080p is good, and higher resolutions may help some of
-the models.
+Aim for an elevated, static perspective of the finish line. 30fps/1080p is passable, but you need 4k for ReID to work (you want at least 200 x 100 pixel human bounding bounding boxes).
 
 The video needs to have start timecode metadata set to a global reference. Frame numbers in this timecode are used to
 key detections and annotations.
@@ -37,6 +46,8 @@ detections and needs to be manually tuned for your video.
 
 * You should specify a crop (`--crop`) region around the finish line, as there's no need to detect runners outside of
   this area.
+* `--device` accepts anything Ultralytics' device selection understands: `cuda`, a GPU index like `0`
+  or `0,1,2,3`, `cpu`, or `mps` for Apple Silicon.
 
 ### Creating an event configuration file
 
@@ -52,34 +63,45 @@ participants, the finish line, and the start times. The `config.yaml` file is a 
 ### Annotating crossings
 
 Annotations are human-verified markings of where in a frame a runner was (bounding box) and whether they crossed the
-line in the frame. The `edit.py` script is a video player GUI which allows you to create and edit these annotations. The
+line in the frame. They are persisted in an `annotations.db` SQLite database in the project directory. The `annotate.py` script is a video player GUI which allows you to create and edit these annotations. The
 workflow is to scrub through detections, promoting them to annnotations as needed, and then to mark the annotations as
 crossing or not crossing the line. Detections do not have an identifying number, so the tool will request input for the
 runner ID. As you mark more annotations, the tool will attempt to re-identify runners based on their visual features.
-You'll need to obtain the weights for the re-identification model from
-the [torchreid model zoo](https://kaiyangzhou.github.io/deep-person-reid/MODEL_ZOO.html). We used `osnet_ain_x1_0`
-trained on MSMT17 for cross-domain re-identification.
+The re-identification model runs on boxmot's ReID backend. Point `--reid-model` at a name boxmot recognizes, such
+as `osnet_ain_x1_0_msmt17.pt`, and it will be auto-downloaded on first use; otherwise place a checkpoint (e.g. from the
+[torchreid model zoo](https://kaiyangzhou.github.io/deep-person-reid/MODEL_ZOO.html)) at `data/` yourself. We used
+`osnet_ain_x1_0` trained on MSMT17 for cross-domain re-identification.
 
 While the GUI window has focus, you can use the following keyboard commands:
 
-| Input                                | Action                                                       |
-|--------------------------------------|--------------------------------------------------------------|
-| `left click` on detection            | Promote detection to annotation                              |
-| `left click` on annotation           | Begin edit (CLI prompt for command)                          |
-| `left click` + `shift` on detection  | Promote detection to annotation crossing                     |
-| `left click` + `shift` on annotation | Mark annotation as crossing                                  |
-| `left click` + `ctrl` on annotation  | Mark annotation as crossing and reassign runner ID (via CLI) |                                                     
-| `right click` -> drag -> release     | Create annotation with start and end corners                 |
-| `[` or `]`                           | Prev/next annotation                                         |
-| `{` or `}`                           | Prev/next crossing annotation                                |
-| `9` or `0`                           | Prev/next detection overlapping finish line                  |
-| `(` or `)`                           | Prev/next frame                                              |
-| `s`                                  | Seek to timecode (via `HH:MM:SS` CLI input)                  |
-| \`                                   | Create note annotation (via CLI)                             |
+| Input                                | Action                                                                             |
+|--------------------------------------|-------------------------------------------------------------------------------------|
+| `left click` on detection            | Promote detection to annotation                                                     |
+| `left click` on annotation           | Begin edit (CLI prompt for command)                                                 |
+| `left click` + `shift` on detection  | Promote detection to annotation crossing                                            |
+| `left click` + `shift` on annotation | Mark annotation as crossing                                                         |
+| `left click` + `ctrl` on annotation  | Mark annotation as crossing and reassign runner ID, propagated to nearby frames (via CLI) |
+| `right click` -> drag -> release     | Create annotation with start and end corners                                        |
+| `e`                                  | Begin edit (CLI prompt for command) on an annotation in the current frame           |
+| `d`                                  | Delete annotation (via CLI prompt for runner ID)                                    |
+| `D`                                  | Delete annotation, propagated to nearby frames (via CLI prompt for runner ID)        |
+| `c`                                  | Mark/unmark annotation as crossing (via CLI prompt for runner ID)                   |
+| `r`                                  | Reassign runner ID (via CLI prompt for runner ID)                                    |
+| `R`                                  | Reassign runner ID, propagated to nearby frames (via CLI prompt for runner ID)       |
+| `[` or `]`                           | Prev/next annotation                                                                 |
+| `{` or `}`                           | Prev/next crossing annotation                                                        |
+| `9` or `0`                           | Prev/next detection overlapping finish line                                         |
+| `(` or `)`                           | Prev/next frame                                                                      |
+| `s`                                  | Seek to timecode (via `HH:MM:SS` CLI input)                                          |
+| \`                                   | Create note annotation (via CLI)                                                     |
+| `Backspace`                          | Jump backward 10s                                                                    |
+| `Delete`                             | Jump forward 10s                                                                     |
+| `Space`                              | Pause/Play video                                                                     |
+| `+` or `-`                           | Increase/decrease playback speed                                                     |
 
-Notes can be arbitrary text and are saved in a separate file. They are useful for marking things that _didn't_ happen,
-like a runner not crossing the line. They will be printed out in the collated lap time tables to help you check your
-work.
+Notes can be arbitrary text and are saved in the `annotations.db` database alongside the annotations. They are useful
+for marking things that _didn't_ happen, like a runner not crossing the line. They will be printed out in the
+collated lap time tables to help you check your work.
 
 ### Collating the results
 
@@ -96,10 +118,10 @@ of dictionaries with the following keys:
 
 * `scripts/get_point_in_video.py`: Get a pixel coordinate in a video by clicking on it. Useful for making the finish
   line config.
+* `scripts/render_video.py`: Trim/concatenate source video(s) into a single re-encoded file with timecode burned in.
 
 ## Future work
 
 * Integrate partial GPS track data
 * Use pose estimation to automatically mark crossings
-* Fix up tracking (partially integrated in `edit.py`, and `track.py` is a WIP)
-* Support folders of JPGs to handle intervalometer/timelapse recordings
+* Fix up tracking (partially integrated in `annotate.py`, and `track.py` is a WIP)

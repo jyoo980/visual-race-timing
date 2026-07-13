@@ -218,7 +218,8 @@ def parse_args():
     parser.add_argument('project', type=pathlib.Path)
     parser.add_argument('--sources', type=pathlib.Path, nargs='+')
     parser.add_argument('--update-tracker', action='store_true',)
-    parser.add_argument('--device', type=str, default='cuda')
+    parser.add_argument('--device', type=str, default='cuda',
+                        help='device to run on, e.g. cuda, 0, 0,1,2,3, cpu, or mps (Apple Silicon)')
     parser.add_argument("--reid-model", type=pathlib.Path, default=pathlib.Path("reid_model.pt"),
                         help='reid model path, or a name boxmot auto-downloads, e.g. one of: '
                              + ', '.join(available_reid_models()))
