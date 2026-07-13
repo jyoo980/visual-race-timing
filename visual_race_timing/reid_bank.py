@@ -1,9 +1,5 @@
 """Standalone, tracker-independent ReID feature bank backed by boxmot's ReID.
 
-This replaces the old ``tracker.pkl`` (joblib-pickled tracker) as the durable
-store of per-runner appearance features used by the manual click->ID path in
-``annotate.py``.
-
 Design notes
 ------------
 * Embeddings come from boxmot's :class:`boxmot.reid.core.ReID`. We reuse its
@@ -42,6 +38,12 @@ DEFAULT_REID_WEIGHTS = (
     / "data"
     / "osnet_ain_x1_0_msmt17_256x128_amsgrad_ep50_lr0.0015_coslr_b64_fb10_softmax_labsmth_flip_jitter.pth"
 )
+
+
+def available_reid_models() -> List[str]:
+    """Names boxmot recognizes and can auto-download (see ``--reid-model``)."""
+    from boxmot.reid.core.config import TRAINED_URLS
+    return sorted(TRAINED_URLS.keys())
 
 
 def build_extractor(weights=None, device: str = "cpu", half: bool = False) -> ReID:

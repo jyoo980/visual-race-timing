@@ -13,9 +13,9 @@ from tqdm import tqdm
 
 from visual_race_timing.annotations import SQLiteAnnotationStore
 import iteround
-import joblib
 
 from visual_race_timing.loader import ImageLoader, VideoLoader
+from visual_race_timing.reid_bank import ReIDBank, available_reid_models, build_extractor
 
 
 def round_floats(o):
@@ -108,14 +108,11 @@ def main(args):
                     participant_lap_times[runner_id] = [details['time']] + participant_lap_times[runner_id]
                     break
 
-    tracker = None
+    bank = None
     if args.update_tracker:
-        from visual_race_timing.tracker import PartiallySupervisedTracker
-        from types import SimpleNamespace
-        with open(args.project / "tracker_config.yaml", "r") as f:
-            tracker_config = yaml.load(f.read(), Loader=yaml.FullLoader)
-            tracker_config = SimpleNamespace(**tracker_config)  # easier dict access by dot, instead of ['']
-        tracker = PartiallySupervisedTracker(args.reid_model, tracker_config, device=args.device)
+        reid_weights = args.reid_model if pathlib.Path(args.reid_model).is_file() else None
+        extractor = build_extractor(reid_weights, device=args.device, half=False)
+        bank = ReIDBank.load(args.project / 'reid_bank.npz', extractor)
 
     if args.crops or args.update_tracker:
         frames_needing_crop = sorted(list(crops.keys()))
@@ -131,11 +128,11 @@ def main(args):
                 if crop[2] - crop[0] < 24 or crop[3] - crop[1] < 24:
                     print(f"Skipping crop {runner_id} {crop_idx} at frame {frame_num} due to small size")
                     continue
-                if tracker:
-                    tracker.update_participant_features(frame, crop, runner_id)
+                if bank is not None:
+                    bank.update(frame, crop, runner_id)
                 cv2.imwrite(crop_out_path / f"{runner_id:02x}_{crop_idx}_{frame_num}.png", to_save)
-        if tracker:
-            joblib.dump(tracker, args.project / 'tracker.pkl')
+        if bank is not None:
+            bank.save(args.project / 'reid_bank.npz')
     report = ""
     for runner_id, lap_start_times in participant_lap_times.items():
         runner_notes = collated_notes[format(runner_id, '02x')]
@@ -222,7 +219,9 @@ def parse_args():
     parser.add_argument('--sources', type=pathlib.Path, nargs='+')
     parser.add_argument('--update-tracker', action='store_true',)
     parser.add_argument('--device', type=str, default='cuda')
-    parser.add_argument("--reid-model", type=pathlib.Path, default=pathlib.Path("reid_model.pt"))
+    parser.add_argument("--reid-model", type=pathlib.Path, default=pathlib.Path("reid_model.pt"),
+                        help='reid model path, or a name boxmot auto-downloads, e.g. one of: '
+                             + ', '.join(available_reid_models()))
     parser.add_argument('--crops', action='store_true',
                         help="Crop images of participants at the start of each lap and save them to the project/crops "
                              "directory.")

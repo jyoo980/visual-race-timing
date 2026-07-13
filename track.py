@@ -1,4 +1,21 @@
 #!/usr/bin/env python
+"""Automated (non-interactive) tracking entrypoint. STATUS: WIP / NOT RUNNABLE.
+
+This script predates the SQLite annotation migration and is currently broken at
+import time. It still depends on APIs that no longer exist:
+  * ``visual_race_timing.video_player``  -> module removed (now ``media_player``)
+  * ``save_txt_annotation`` / ``load_annotations`` -> removed from
+    ``annotations.py`` (superseded by ``SQLiteAnnotationStore``)
+  * ``visual_race_timing.video`` helpers -> verify presence
+
+The ``RaceTracker`` usage below HAS been updated to the boxmot BotSort API
+(Step 2 of the boxmot migration) so that, when the surrounding data pipeline is
+ported onto ``SQLiteAnnotationStore`` + the current loaders, the tracker call is
+already correct. Until that port happens, do NOT expect this file to run.
+
+TODO(boxmot-migration): rewrite the detection I/O to read from
+``SQLiteAnnotationStore`` and a current media loader, then verify end-to-end.
+"""
 import argparse
 import pathlib
 
@@ -17,6 +34,7 @@ from visual_race_timing.drawing import draw_annotation
 
 from visual_race_timing.geometry import side_of_line
 from visual_race_timing.video import get_video_height_width, crop_videos
+from visual_race_timing.reid_bank import available_reid_models, build_extractor
 from visual_race_timing.tracker import RaceTracker
 
 from visual_race_timing.video_player import VideoPlayer, DisplayWindow
@@ -84,11 +102,15 @@ def run(args):
         print(cfg)
         cfg = SimpleNamespace(**cfg)  # easier dict access by dot, instead of ['']
 
+    # Share one ReID backend (same embedding space as the ReIDBank).
+    reid_weights = args.reid_model if Path(args.reid_model).is_file() else None
+    reid_extractor = build_extractor(reid_weights, device=args.device, half=args.half)
     tracker = RaceTracker(
-        args.reid_model,
-        cfg,
-        participants={bib.lower(): name for bib, name in race_config['participants'].items()},
-        device=args.device
+        reid_model=reid_extractor.model,
+        participants={format(int(bib), '02x').lower() if not isinstance(bib, str) else bib.lower(): name
+                      for bib, name in race_config['participants'].items()},
+        policy="prompt",
+        use_cmc=False,
     )
     tracker.display_delegate = lambda img: display_window.img_queue.put(img, block=False)
 
@@ -146,12 +168,17 @@ def run(args):
         player.seek_frame(frame_num)
         frame = player._advance_frame()
 
-        boxes = Boxes(detections["boxes"], frame.shape[:2])
-        tracks = tracker.update(boxes, frame, frame_num)
+        # boxmot dets are (N,6)=(x1,y1,x2,y2,conf,cls).
+        # TODO(boxmot-migration): confirm detections["boxes"] layout under the
+        # SQLite store and slice to the 6 columns accordingly.
+        dets = np.asarray(detections["boxes"], dtype=np.float32)
+        res = tracker.update(dets, frame)  # -> TrackResults (K,8)
+        tracks = np.asarray(res[:, :7])  # [x1,y1,x2,y2,id,conf,cls]
 
-        # The last column of the tracks array is the original index of the detection. Rearrange them to match
-        idx = tracks[:, -1].astype(int)
-        boxes = Boxes(tracks[idx, :-1], frame.shape[:2])
+        # Reorder to match input detection order via det_ind (last TrackResults col).
+        idx = np.asarray(res.det_ind, dtype=int)
+        order = np.argsort(idx)
+        boxes = Boxes(tracks[order], frame.shape[:2])
         crossings = [False] * len(boxes)
         keypoints = None
         track_boxes[frame_num] = {"boxes": boxes.data, "kpts": keypoints, "crossings": crossings}
@@ -165,7 +192,8 @@ def parse_opt():
     parser.add_argument('project', type=pathlib.Path,
                         help='save results to project/name')
     parser.add_argument('--reid-model', type=Path, default='osnet_x0_25_msmt17.pt',
-                        help='reid model path')
+                        help='reid model path, or a name boxmot auto-downloads, e.g. one of: '
+                             + ', '.join(available_reid_models()))
     parser.add_argument('--tracking-method', type=str, default='deepocsort',
                         help='deepocsort, botsort, strongsort, ocsort, bytetrack')
     # We depend on video files with timecode metadata. Hacking required to support other sources.

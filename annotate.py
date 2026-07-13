@@ -14,7 +14,8 @@ from ultralytics.utils.metrics import bbox_ioa
 
 from visual_race_timing.annotations import SQLiteAnnotationStore
 from visual_race_timing.drawing import draw_annotation
-from visual_race_timing.reid_bank import ReIDBank, build_extractor
+from visual_race_timing.reid_bank import ReIDBank, available_reid_models, build_extractor
+from visual_race_timing.tracker import RaceTracker
 
 from visual_race_timing.geometry import line_segment_to_box_distance
 from visual_race_timing.prompts import ask_for_id
@@ -40,19 +41,29 @@ def run(args):
         cfg = yaml.load(f.read(), Loader=yaml.FullLoader)
         cfg = SimpleNamespace(**cfg)  # easier dict access by dot, instead of ['']
     cfg.match_thresh = .8
+    # boxmot's BotSort expects `cmc_method`; the project config predates boxmot and uses `gmc_method`.
+    tracker_kwargs = vars(cfg).copy()
+    tracker_kwargs['cmc_method'] = tracker_kwargs.pop('gmc_method')
 
     # ReID feature bank for the manual click->ID path (replaces tracker.pkl).
     reid_weights = args.reid_model if pathlib.Path(args.reid_model).is_file() else None
     reid_extractor = build_extractor(reid_weights, device=args.device, half=False)
     bank = ReIDBank.load(args.project / 'reid_bank.npz', reid_extractor)
 
-    # NOTE: the interactive "(" / ")" tracking block still references `tracker`
-    # and is intentionally left broken until Step 2 re-hosts it on boxmot BotSort.
-    tracker = None
     # Load race configuration from yaml
     race_config = args.project / 'config.yaml'
     with open(race_config, "r") as f:
         race_config = yaml.load(f.read(), Loader=yaml.FullLoader)
+
+    # Interactive tracker for the "(" / ")" forward/backward tracking block.
+    #  shares the ReID backend with `bank` so the
+    # tracker and the manual click->ID bank live in one embedding space.
+    participants_by_bib = {format(int(rid), '02x').lower(): name
+                           for rid, name in race_config['participants'].items()}
+    tracker = RaceTracker(reid_model=reid_extractor.model,
+                          participants=participants_by_bib,
+                          policy="prompt", use_cmc=False,
+                          **tracker_kwargs)
 
     if args.seek_frame:
         args.seek_time = str(Timecode(player.get_last_timecode().framerate, frames=args.seek_timecode_frame))
@@ -318,8 +329,14 @@ def run(args):
                 # Check if any of the detected boxes are near the line
                 on_line_mask = line_segment_to_box_distance(line_seg_pts[0], line_seg_pts[1], combined[:, :4]) < 10
                 if any(on_line_mask):
-                    as_boxes = Boxes(combined[on_line_mask], frame.shape[:2])
-                    out = tracker.update(as_boxes, frame)
+                    # boxmot dets are (N,6)=(x1,y1,x2,y2,conf,cls); ids ride a
+                    # side channel. combined cols are [x1,y1,x2,y2,id,conf,cls].
+                    sel = combined[on_line_mask]
+                    dets = sel[:, [0, 1, 2, 3, 5, 6]].astype(np.float32)
+                    known_ids = sel[:, 4]
+                    res = tracker.update(dets, frame, known_ids=known_ids)
+                    # TrackResults (K,8) -> [x1,y1,x2,y2,id,conf,cls]
+                    out = np.asarray(res[:, :7])
 
                     new_boxes = np.vstack([out[:, :7], combined[annotated_mask & ~on_line_mask, :7]])
                     new_crossings = np.concatenate(
@@ -350,7 +367,7 @@ def run(args):
                 else:
                     out_timecode = Timecode(player.get_last_timecode().framerate, frames=start_frame + i)
                     logger.info(f"Skipping {out_timecode} {out_timecode.frames}")
-                    tracker.update(Boxes(np.zeros((0, 7)), frame.shape[:2]), frame)
+                    tracker.update(np.zeros((0, 6), dtype=np.float32), frame)
                 i += 1 if key == ord(')') else -1
         return None
 
@@ -423,7 +440,8 @@ def parse_opt():
     parser.add_argument('--seek-time', type=str, default=None, help='seek time to start tracking')
     parser.add_argument('--paused', action='store_true', help='start paused')
     parser.add_argument('--reid-model', type=pathlib.Path, default='osnet_x0_25_msmt17.pt',
-                        help='reid model path')
+                        help='reid model path, or a name boxmot auto-downloads, e.g. one of: '
+                             + ', '.join(available_reid_models()))
     parser.add_argument('--device', default='cuda',
                         help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--detection-model', type=str, default='detection',

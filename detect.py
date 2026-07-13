@@ -20,10 +20,21 @@ from visual_race_timing.loader import ImageLoader, VideoLoader
 from visual_race_timing.media_player import DisplayWindow
 
 
+def available_detect_models() -> list[str]:
+    """Ultralytics detect-model stems (no -seg/-pose/-obb/-cls/-world variants,
+    no SAM/RT-DETR/etc.) that Ultralytics will auto-download by name."""
+    import re
+    from ultralytics.utils.downloads import GITHUB_ASSETS_STEMS
+    pattern = re.compile(r'^yolo(v3|v5|v8|v9|v10|11|12|26)')
+    return sorted(s for s in GITHUB_ASSETS_STEMS if pattern.match(s) and '-' not in s)
+
+
 @torch.no_grad()
 def run(args):
-    display_window = DisplayWindow("Race Timing")
-    display_window.start()
+    display_window = None
+    if args.show:
+        display_window = DisplayWindow("Race Timing")
+        display_window.start()
     yolo = YOLO(args.detection_model)
     # Load race configuration from yaml
     race_config = args.project / 'config.yaml'
@@ -121,7 +132,8 @@ def parse_opt():
     parser.add_argument('project', type=Path, default=pathlib.Path('data/exp'),
                         help='save results to project')
     parser.add_argument('--detection-model', type=Path, default='yolo26n',
-                        help='yolo model path')
+                        help='yolo model path, or a name Ultralytics auto-downloads, e.g. one of: '
+                             + ', '.join(available_detect_models()))
     # We depend on video files with timecode metadata. Hacking required to support other sources.
     parser.add_argument('--source', type=pathlib.Path, nargs='+',
                         help='filepath(s)')
