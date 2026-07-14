@@ -14,7 +14,8 @@ from ultralytics.utils.metrics import bbox_ioa
 
 from visual_race_timing.annotations import SQLiteAnnotationStore
 from visual_race_timing.drawing import draw_annotation
-from visual_race_timing.reid_bank import ReIDBank, available_reid_models, build_extractor
+from visual_race_timing.reid_bank import DEFAULT_REID_WEIGHTS, ReIDBank, available_reid_models, build_extractor
+from visual_race_timing.timing_prior import TimingPrior, build_start_realtime
 from visual_race_timing.tracker import RaceTracker
 
 from visual_race_timing.geometry import line_segment_to_box_distance
@@ -45,9 +46,8 @@ def run(args):
     tracker_kwargs = vars(cfg).copy()
     tracker_kwargs['cmc_method'] = tracker_kwargs.pop('gmc_method')
 
-    # ReID feature bank for the manual click->ID path (replaces tracker.pkl).
-    reid_weights = args.reid_model if pathlib.Path(args.reid_model).is_file() else None
-    reid_extractor = build_extractor(reid_weights, device=args.device, half=False)
+    # ReID feature bank for the manual click->ID path
+    reid_extractor = build_extractor(args.reid_model, device=args.device, half=False)
     bank = ReIDBank.load(args.project / 'reid_bank.npz', reid_extractor)
 
     # Load race configuration from yaml
@@ -439,9 +439,10 @@ def parse_opt():
                         help='seek frame (timecode index from start) to start tracking')
     parser.add_argument('--seek-time', type=str, default=None, help='seek time to start tracking')
     parser.add_argument('--paused', action='store_true', help='start paused')
-    parser.add_argument('--reid-model', type=pathlib.Path, default='osnet_x0_25_msmt17.pt',
+    parser.add_argument('--reid-model', type=pathlib.Path, default=None,
                         help='reid model path, or a name boxmot auto-downloads, e.g. one of: '
-                             + ', '.join(available_reid_models()))
+                             + ', '.join(available_reid_models())
+                             + f'. Defaults to the repo weights ({DEFAULT_REID_WEIGHTS.name}).')
     parser.add_argument('--device', default='cuda',
                         help='device to run on, e.g. cuda, 0, 0,1,2,3, cpu, or mps (Apple Silicon)')
     parser.add_argument('--detection-model', type=str, default='detection',

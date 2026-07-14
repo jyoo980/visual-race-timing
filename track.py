@@ -34,7 +34,7 @@ from visual_race_timing.drawing import draw_annotation
 
 from visual_race_timing.geometry import side_of_line
 from visual_race_timing.video import get_video_height_width, crop_videos
-from visual_race_timing.reid_bank import available_reid_models, build_extractor
+from visual_race_timing.reid_bank import DEFAULT_REID_WEIGHTS, available_reid_models, build_extractor
 from visual_race_timing.tracker import RaceTracker
 
 from visual_race_timing.video_player import VideoPlayer, DisplayWindow
@@ -103,8 +103,7 @@ def run(args):
         cfg = SimpleNamespace(**cfg)  # easier dict access by dot, instead of ['']
 
     # Share one ReID backend (same embedding space as the ReIDBank).
-    reid_weights = args.reid_model if Path(args.reid_model).is_file() else None
-    reid_extractor = build_extractor(reid_weights, device=args.device, half=args.half)
+    reid_extractor = build_extractor(args.reid_model, device=args.device, half=args.half)
     tracker = RaceTracker(
         reid_model=reid_extractor.model,
         participants={format(int(bib), '02x').lower() if not isinstance(bib, str) else bib.lower(): name
@@ -191,9 +190,10 @@ def parse_opt():
 
     parser.add_argument('project', type=pathlib.Path,
                         help='save results to project/name')
-    parser.add_argument('--reid-model', type=Path, default='osnet_x0_25_msmt17.pt',
+    parser.add_argument('--reid-model', type=Path, default=None,
                         help='reid model path, or a name boxmot auto-downloads, e.g. one of: '
-                             + ', '.join(available_reid_models()))
+                             + ', '.join(available_reid_models())
+                             + f'. Defaults to the repo weights ({DEFAULT_REID_WEIGHTS.name}).')
     parser.add_argument('--tracking-method', type=str, default='deepocsort',
                         help='deepocsort, botsort, strongsort, ocsort, bytetrack')
     # We depend on video files with timecode metadata. Hacking required to support other sources.

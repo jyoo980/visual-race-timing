@@ -15,7 +15,7 @@ from visual_race_timing.annotations import SQLiteAnnotationStore
 import iteround
 
 from visual_race_timing.loader import ImageLoader, VideoLoader
-from visual_race_timing.reid_bank import ReIDBank, available_reid_models, build_extractor
+from visual_race_timing.reid_bank import DEFAULT_REID_WEIGHTS, ReIDBank, available_reid_models, build_extractor
 
 
 def round_floats(o):
@@ -110,8 +110,7 @@ def main(args):
 
     bank = None
     if args.update_tracker:
-        reid_weights = args.reid_model if pathlib.Path(args.reid_model).is_file() else None
-        extractor = build_extractor(reid_weights, device=args.device, half=False)
+        extractor = build_extractor(args.reid_model, device=args.device, half=False)
         bank = ReIDBank.load(args.project / 'reid_bank.npz', extractor)
 
     if args.crops or args.update_tracker:
@@ -220,9 +219,10 @@ def parse_args():
     parser.add_argument('--update-tracker', action='store_true',)
     parser.add_argument('--device', type=str, default='cuda',
                         help='device to run on, e.g. cuda, 0, 0,1,2,3, cpu, or mps (Apple Silicon)')
-    parser.add_argument("--reid-model", type=pathlib.Path, default=pathlib.Path("reid_model.pt"),
+    parser.add_argument("--reid-model", type=pathlib.Path, default=None,
                         help='reid model path, or a name boxmot auto-downloads, e.g. one of: '
-                             + ', '.join(available_reid_models()))
+                             + ', '.join(available_reid_models())
+                             + f'. Defaults to the repo weights ({DEFAULT_REID_WEIGHTS.name}).')
     parser.add_argument('--crops', action='store_true',
                         help="Crop images of participants at the start of each lap and save them to the project/crops "
                              "directory.")
