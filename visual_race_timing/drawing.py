@@ -68,7 +68,7 @@ def draw_annotation(
             for i, d in enumerate(reversed(pred_boxes)):
                 # Flip the reversed index...
                 idx = len(pred_boxes) - i - 1
-                c, conf, id = int(d.cls), float(d.conf) if conf is not None else None, None if d.id is None else int(
+                c, conf, id = int(d.cls.item()), float(d.conf.item()) if conf is not None else None, None if d.id is None else int(
                     d.id.item())
                 is_crossing = crossings[idx] if crossings is not None else None
                 name = labels[idx] if labels else ""
