@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import argparse
 import pathlib
+from collections import defaultdict
 from types import SimpleNamespace
 from typing import List
 
@@ -15,7 +16,8 @@ from ultralytics.utils.metrics import bbox_ioa
 from visual_race_timing.annotations import SQLiteAnnotationStore
 from visual_race_timing.drawing import draw_annotation
 from visual_race_timing.reid_bank import DEFAULT_REID_WEIGHTS, ReIDBank, available_reid_models, build_extractor
-from visual_race_timing.timing_prior import TimingPrior, build_start_realtime
+from visual_race_timing.race_config import build_start_realtime
+from visual_race_timing.timing_prior import TimingPrior, fuse_ranking
 from visual_race_timing.tracker import RaceTracker
 
 from visual_race_timing.geometry import line_segment_to_box_distance
@@ -110,7 +112,34 @@ def run(args):
             bank.update(player._last_frame_img, new_box, runner_id)
         return True
 
-    def calculate_reid_distances(box, exclude: List[int] = []):
+    # --- Timing prior -------------------------------------------------------
+    # Fuse each runner's lap history ("are they due to cross now?") into the
+    # crossing-ID guess. Built lazily from the store's human crossings and
+    # invalidated whenever a crossing is added/toggled so it stays current with
+    # the session. Only applied to on-the-line crossing guesses (see below).
+    _timing = {"prior": None}
+
+    def invalidate_timing_prior():
+        _timing["prior"] = None
+
+    def get_timing_prior():
+        if _timing["prior"] is None:
+            fps = player.get_last_timecode().framerate
+            ann = store.load_all_annotations(source="human", crossing=True)
+            crossings_by_runner = defaultdict(list)
+            for frame_num, data in ann.items():
+                frame_boxes = data["boxes"]
+                if frame_boxes is None or frame_boxes.size == 0:
+                    continue
+                secs = Timecode(fps, frames=frame_num).to_realtime(as_float=True)
+                for rid in frame_boxes[:, 4].astype(int):
+                    if int(rid) in race_config["participants"]:
+                        crossings_by_runner[int(rid)].append(secs)
+            start_map = build_start_realtime(race_config, fps)
+            _timing["prior"] = TimingPrior.build(crossings_by_runner, start_map)
+        return _timing["prior"]
+
+    def calculate_reid_distances(box, exclude: List[int] = [], timecode=None, crossing=False):
         new_box = np.atleast_2d(box)
         candidate_participants, emb_dists = bank.guess(player._last_frame_img, new_box)
 
@@ -119,6 +148,11 @@ def run(args):
         paired.sort(key=lambda x: x[0])
         dists = [d for d, _ in paired]
         ids = [i for _, i in paired]
+        # Fuse the timing prior for line crossings only (it models "due to cross
+        # now", which is meaningless for a box away from the finish line).
+        if crossing and timecode is not None and ids:
+            t = timecode.to_realtime(as_float=True)
+            ids, dists, _ = fuse_ranking(get_timing_prior(), ids, dists, t)
         return dists, ids
 
     def query_for_reid(emb_dists, candidate_participants):
@@ -136,7 +170,8 @@ def run(args):
             [new_annotation[0][0], new_annotation[0][1], new_annotation[1][0], new_annotation[1][1], -1, 1.0, 0],
             dtype=np.float32))
         if annotation_id is None:
-            emb_dists, candidate_participants = calculate_reid_distances(new_box)
+            emb_dists, candidate_participants = calculate_reid_distances(
+                new_box, timecode=timecode, crossing=crossing)
             if force and emb_dists[0] < .15:
                 # Force reid to the first candidate
                 annotation_id = f"{candidate_participants[0]:02x}"
@@ -149,6 +184,9 @@ def run(args):
         new_box[:, 4] = int(annotation_id, 16)
         store.update_annotation(timecode.frames, Boxes(new_box, player._last_frame_img.shape[:2]), None,
                                 [crossing], "human")
+        if crossing:
+            # New crossing labeled -> the timing prior's history is now stale.
+            invalidate_timing_prior()
         return True
 
     def key_delegate(frame, frame_num, key, runner_id: str = None):
@@ -229,6 +267,8 @@ def run(args):
                 else:
                     logger.info(
                         f"Unmarked {runner_id} {player.get_last_timecode()} ({player.get_last_timecode().frames}) as crossing.")
+                # Crossing history changed -> refresh the timing prior lazily.
+                invalidate_timing_prior()
             elif key == ord('r') or key == ord("R"):
                 # Can be reassigned to anything, but null out current ID under the assumption we want a different result
                 # FIXME: Occasional crasher, probably when reassigning with a single box in the frame

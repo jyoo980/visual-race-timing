@@ -54,11 +54,16 @@ detections and needs to be manually tuned for your video.
 Create a `config.yaml` file in the project directory. This file contains the event configuration, including the
 participants, the finish line, and the start times. The `config.yaml` file is a dictionary with the following keys:
 
-| Key          | Description                                                                                                                                                                     |
-|--------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| participants | Dictionary with bib number key to runner name value                                                                                                                             |
-| finish_line  | Tuple of two points for finish line pixels [[x0, y0], [x1, y1]]. Get these points with `scripts/get_point_in_video.py`                                                          |
-| starts       | Dict with named starts (e.g. 'marathon', 'half'), where values are dicts with keys `timecode` and `bib_range` (inclusive tuple of minimum and maximum bib with this start time) |
+| Key                   | Description                                                                                                                                                                                                                                                                                                                                                                                                                             |
+|-----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| participants          | Dictionary with bib number key to runner name value                                                                                                                                                                                                                                                                                                                                                                                     |
+| finish_line           | Tuple of two points for finish line pixels [[x0, y0], [x1, y1]]. Get these points with `scripts/get_point_in_video.py`                                                                                                                                                                                                                                                                                                                  |
+| starts                | Dict with named starts (e.g. 'marathon', 'half'), where values are dicts with keys `time` (timecode string) and either `bib_range` (half-open `[lo, hi)` tuple of bibs) or an explicit `bibs` list. `bibs` wins if both are given. An optional per-start `start_distance` (course distance already covered at that start, e.g. for a wave joining partway through) is forwarded into `results.json` but isn't used by collation itself. |
+| exclude               | List of bibs to omit from `collate.py`'s report/`results.json` output                                                                                                                                                                                                                                                                                                                                                                   |
+| lap_distance          | Distance covered by one lap. Forwarded into `results.json`; not used by collation itself.                                                                                                                                                                                                                                                                                                                                               |
+| goals                 | Dict per start name mapping milestone labels (e.g. `5k`, `13_1mi`) to the lap number at which that distance is reached. Forwarded into `results.json`; not used by collation itself.                                                                                                                                                                                                                                                    |
+| first_lap_is_entrance | Whether the first recorded "lap" is the entrance onto the course rather than a full lap. Forwarded into `results.json`; not used by collation itself.                                                                                                                                                                                                                                                                                   |
+| direction_starts / directions | Parallel lists of timecodes and course directions (`CW`/`CCW`) for courses that alternate direction over time. Forwarded into `results.json`; not used by collation itself.                                                                                                                                                                                                                                                             |
 
 ### Annotating crossings
 
@@ -71,6 +76,26 @@ The re-identification model runs on boxmot's ReID backend. Point `--reid-model` 
 as `osnet_ain_x1_0_msmt17.pt`, and it will be auto-downloaded on first use; otherwise place a checkpoint (e.g. from the
 [torchreid model zoo](https://kaiyangzhou.github.io/deep-person-reid/MODEL_ZOO.html)) at `data/` yourself. We used
 `osnet_ain_x1_0` trained on MSMT17 for cross-domain re-identification.
+
+#### The timing prior
+
+Appearance isn't the only clue to who just crossed: a runner's lap history says a lot about whether they're plausibly
+crossing *now*. Someone who crossed 10 seconds ago almost certainly isn't; someone whose laps run ~90s and who last
+crossed ~90s ago very likely is.
+
+For each candidate, the tool estimates their lap time `mu` from their own previous laps (recent laps weighted most, so
+it tracks fatigue; shrunk toward the field average when they have few laps) and scores the time elapsed since their last
+crossing against it. Because crossings get missed, the score is a mixture over "this is their next lap", "they missed
+one", and so on, each successive miss discounted by a factor `rho`:
+
+![Timing prior density](docs/timing-prior.svg)
+
+Only crossings *before* the current frame are used, so the prior sees exactly the history you've annotated so far. It's
+combined with the ReID appearance distance to re-rank the candidate list the tool suggests — you still see the
+appearance confidence, only the ordering reflects timing. Runners with no history yet fall back to the field-average lap
+and neither win nor lose ground.
+
+#### Commands
 
 While the GUI window has focus, you can use the following keyboard commands:
 

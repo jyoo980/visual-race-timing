@@ -15,6 +15,7 @@ from visual_race_timing.annotations import SQLiteAnnotationStore
 import iteround
 
 from visual_race_timing.loader import ImageLoader, VideoLoader
+from visual_race_timing.race_config import assign_start_by_runner
 from visual_race_timing.reid_bank import DEFAULT_REID_WEIGHTS, ReIDBank, available_reid_models, build_extractor
 
 
@@ -68,10 +69,6 @@ def main(args):
     with open(race_config, "r") as f:
         race_config = yaml.load(f.read(), Loader=yaml.FullLoader)
 
-    starts = race_config['starts']
-    for start_name, details in starts.items():
-        starts[start_name]['time'] = Timecode(fps, details['time'])
-
     store = SQLiteAnnotationStore(args.project / "annotations.db")
     annotations = store.load_all_annotations(loader.get_image_dims(), "human", crossing=True)
     notes = store.load_notes()
@@ -96,17 +93,10 @@ def main(args):
             collated_notes[runner_id][frame_num] = note
 
     # Insert start time at start of lap time list depending on bib
+    start_by_runner = assign_start_by_runner(race_config, fps)
     for runner_id in participant_lap_times.keys():
-        for start_name, details in starts.items():
-            if 'bib_range' in details:
-                bib_range = details['bib_range']
-                if bib_range[0] <= runner_id < bib_range[1]:
-                    participant_lap_times[runner_id] = [details['time']] + participant_lap_times[runner_id]
-                    break
-            elif "bibs" in details:
-                if runner_id in details['bibs']:
-                    participant_lap_times[runner_id] = [details['time']] + participant_lap_times[runner_id]
-                    break
+        if runner_id in start_by_runner:
+            participant_lap_times[runner_id] = [start_by_runner[runner_id]] + participant_lap_times[runner_id]
 
     bank = None
     if args.update_tracker:
