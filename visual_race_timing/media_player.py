@@ -1,5 +1,4 @@
 import logging
-import threading
 from queue import Queue
 
 import cv2
@@ -310,27 +309,43 @@ class BufferedVideoPlayer(VideoPlayer):
             return None
 
 
-class DisplayWindow(threading.Thread):
+class DisplayWindow:
+    """Queues frames from any thread, but only touches cv2's GUI calls from
+    whichever thread calls ``pump()``. On macOS, cv2's Cocoa backend requires
+    all window/imshow/waitKey calls to happen on the main thread, so callers
+    must invoke ``pump()`` there (e.g. once per iteration of the main loop)
+    rather than running display on a background thread."""
+
     def __init__(self, window_name):
-        threading.Thread.__init__(self)
         self.img_queue = Queue()
         self.window_name = window_name
-        self.stop_event = threading.Event()
+        self._started = False
+
+    def start(self):
+        cv2.namedWindow(self.window_name)
+        self._started = True
 
     def clear(self):
         with self.img_queue.mutex:
             self.img_queue.queue.clear()
 
-    def run(self):
-        cv2.namedWindow(self.window_name)
-        while not self.stop_event.is_set():
-            if not self.img_queue.empty():
-                img = self.img_queue.get()
-                cv2.imshow(self.window_name, img)
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord(' ') or key == ord('q'):
-                break
-        cv2.destroyAllWindows()
+    def pump(self):
+        """Call from the main thread. Renders the latest queued frame and
+        processes window events. Returns False if the user asked to quit."""
+        if not self._started:
+            return True
+        img = None
+        while not self.img_queue.empty():
+            img = self.img_queue.get()
+        if img is not None:
+            cv2.imshow(self.window_name, img)
+        key = cv2.waitKey(1) & 0xFF
+        return key != ord(' ') and key != ord('q')
+
+    def stop(self):
+        if self._started:
+            cv2.destroyAllWindows()
+            self._started = False
 
 
 class PhotoPlayer(MediaPlayer):

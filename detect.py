@@ -18,6 +18,7 @@ from visual_race_timing.drawing import render_timecode, draw_annotation
 from visual_race_timing.geometry import line_segment_to_box_distance
 from visual_race_timing.loader import ImageLoader, VideoLoader
 from visual_race_timing.media_player import DisplayWindow
+from visual_race_timing.race_config import get_finish_line
 
 
 def available_detect_models() -> list[str]:
@@ -41,15 +42,8 @@ def run(args):
     with open(race_config, "r") as f:
         race_config = yaml.load(f.read(), Loader=yaml.FullLoader)
 
-    finish_line_p0 = race_config['finish_line'][0]
-    finish_line_p1 = race_config['finish_line'][1]
-
     if args.crop:
         args.imgsz = args.crop[0], args.crop[1]
-        # Apply crop to finish line
-        finish_line_p0 = (finish_line_p0[0] - args.crop[2], finish_line_p0[1] - args.crop[3])
-        finish_line_p1 = (finish_line_p1[0] - args.crop[2], finish_line_p1[1] - args.crop[3])
-    line_seg_pts = [finish_line_p0, finish_line_p1]
     if len(args.source) == 1 and args.source[0].is_dir():
         loader = ImageLoader(args.source[0], batch=args.batch, crop=args.crop)
     else:
@@ -96,35 +90,53 @@ def run(args):
         yolo.predictor.custom_args = args
         yolo.clear_callback('on_predict_start')
         yolo.clear_callback('on_predict_postprocess_end')
+        quit_requested = False
         for r, m in zip(results, metadata):
             det = r.boxes.cpu().numpy()
-            if len(det) == 0:
-                continue
-
-            if line_seg_pts is None:
-                on_line_mask = np.ones(len(det), dtype=bool)
-            else:
-                on_line_mask = line_segment_to_box_distance(line_seg_pts[0], line_seg_pts[1], det.xyxy) < 10
-
             start_timecode = m[0]
-            timecode_frame = start_timecode.frames
-            boxes, keypoints = r.boxes[on_line_mask], None
-            if len(boxes) == 0:
-                continue
-            crossings = [False] * len(boxes)
-            if r.keypoints is not None:
-                keypoints = r.keypoints[on_line_mask]
+            finish_line_p0, finish_line_p1 = get_finish_line(
+                race_config, start_timecode,
+                frame_width=loader._source_dims[0][1], frame_height=loader._source_dims[0][0])
+            if args.crop:
+                finish_line_p0 = (finish_line_p0[0] - args.crop[2], finish_line_p0[1] - args.crop[3])
+                finish_line_p1 = (finish_line_p1[0] - args.crop[2], finish_line_p1[1] - args.crop[3])
+            line_seg_pts = [finish_line_p0, finish_line_p1]
+
+            boxes, keypoints = None, None
+            if len(det) != 0:
+                on_line_mask = line_segment_to_box_distance(line_seg_pts[0], line_seg_pts[1], det.xyxy) < 10
+                boxes, keypoints = r.boxes[on_line_mask], None
+                if r.keypoints is not None:
+                    keypoints = r.keypoints[on_line_mask]
 
             if args.show:
-                img = draw_annotation(boxes.data, keypoints=keypoints.data if keypoints else None,
-                                      img=r.orig_img, line_width=args.line_width, conf=boxes.conf)
-                render_timecode(start_timecode, img, img)
-                cv2.line(img, finish_line_p0, finish_line_p1, (0, 255, 0), 2)
-                display_window.img_queue.put(img, block=False)
+                if boxes is not None and len(boxes) != 0:
+                    img = draw_annotation(boxes.data, keypoints=keypoints.data if keypoints else None,
+                                          img=r.orig_img, line_width=args.line_width, conf=boxes.conf)
+                    render_timecode(start_timecode, img, img)
+                    line_p0 = tuple(round(c) for c in finish_line_p0)
+                    line_p1 = tuple(round(c) for c in finish_line_p1)
+                    cv2.line(img, line_p0, line_p1, (0, 255, 0), 2)
+                    display_window.img_queue.put(img, block=False)
+                # cv2's Cocoa backend only allows GUI calls from the main thread, so
+                # events/rendering must be pumped here rather than on a display thread.
+                if not display_window.pump():
+                    quit_requested = True
+
+            if quit_requested or boxes is None or len(boxes) == 0:
+                continue
+
+            timecode_frame = start_timecode.frames
+            crossings = [False] * len(boxes)
             if args.crop:
                 boxes, keypoints = offset_with_crop(boxes, keypoints, args.crop, loader._source_dims[0])
             store.save_annotation(timecode_frame, boxes, keypoints, crossings, source=args.detection_model.stem,
                                   replace=True)
+        if quit_requested:
+            break
+
+    if display_window is not None:
+        display_window.stop()
 
 
 def parse_opt():

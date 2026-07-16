@@ -16,7 +16,7 @@ from ultralytics.utils.metrics import bbox_ioa
 from visual_race_timing.annotations import SQLiteAnnotationStore
 from visual_race_timing.drawing import draw_annotation
 from visual_race_timing.reid_bank import DEFAULT_REID_WEIGHTS, ReIDBank, available_reid_models, build_extractor
-from visual_race_timing.race_config import build_start_realtime
+from visual_race_timing.race_config import build_start_realtime, get_finish_line
 from visual_race_timing.timing_prior import TimingPrior, fuse_ranking
 from visual_race_timing.tracker import RaceTracker
 
@@ -310,14 +310,19 @@ def run(args):
                 return None
         elif key == ord('9') or key == ord('0'):
             # Seek to line detection
-            line_seg_pts = [race_config['finish_line'][0], race_config['finish_line'][1]]
+            fps = player.get_last_timecode().framerate
+            frame_h, frame_w = frame.shape[:2]
             previous = key == ord('9')
+
+            def on_line(x):
+                p0, p1 = get_finish_line(race_config, Timecode(fps, frames=x["frame_number"]),
+                                         frame_width=frame_w, frame_height=frame_h)
+                boxes = ultralytics.utils.ops.xywhn2xyxy(
+                    np.array([x["x_center"], x["y_center"], x["width"], x["height"]]), frame_w, frame_h)
+                return any(line_segment_to_box_distance(p0, p1, boxes) < 10)
+
             next_frame = store.scan_to_annotation(frame_num, previous=previous, source=args.detection_model,
-                                                  custom_check=lambda x: any(
-                line_segment_to_box_distance(line_seg_pts[0], line_seg_pts[1],
-                                             ultralytics.utils.ops.xywhn2xyxy(
-                                                 np.array([x["x_center"], x["y_center"], x["width"], x["height"]]),
-                                                 *frame.shape[1::-1])) < 10))
+                                                  custom_check=on_line)
 
             if next_frame:
                 next_timecode = Timecode(player.get_last_timecode().framerate,
@@ -332,11 +337,14 @@ def run(args):
             return None
         elif key == ord('(') or key == ord(')'):
             # Track forward/backward
-            line_seg_pts = [race_config['finish_line'][0], race_config['finish_line'][1]]
+            fps = player.get_last_timecode().framerate
+            frame_h, frame_w = frame.shape[:2]
             # tracker.reset()
             start_frame = player.get_last_timecode().frames
             i = 0
             while True:
+                line_seg_pts = get_finish_line(race_config, Timecode(fps, frames=start_frame + i),
+                                               frame_width=frame_w, frame_height=frame_h)
                 detected_boxes, _, _, _ = store.get_frame_annotation(start_frame + i, source=args.detection_model)
                 annotation = store.get_frame_annotation(start_frame + i,
                                              {"boxes": np.zeros((0, 7)), "kpts": None, "crossings": []})

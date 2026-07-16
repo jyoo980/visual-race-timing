@@ -59,3 +59,51 @@ def build_start_realtime(race_config: dict, fps) -> Dict[int, float]:
     """Map runner_id -> wave-start realtime seconds."""
     return {rid: t.to_realtime(as_float=True)
             for rid, t in assign_start_by_runner(race_config, fps).items()}
+
+
+def _resolve_point(point, frame_width, frame_height):
+    """A ``[x, y]`` config point to a ``(x, y)`` pixel-coordinate tuple.
+
+    Float coordinates are treated as fractions of (frame_width, frame_height)
+    in [0, 1] (resolution-independent); ints are already pixel coordinates.
+    """
+    x, y = point
+    if isinstance(x, float) or isinstance(y, float):
+        if frame_width is None or frame_height is None:
+            raise ValueError("finish_line has normalized float coordinates but no "
+                             "frame_width/frame_height was given to resolve them to pixels.")
+        return x * frame_width, y * frame_height
+    return float(x), float(y)
+
+
+def get_finish_line(race_config: dict, timecode: Timecode, frame_width: int = None, frame_height: int = None):
+    """Resolve ``config['finish_line']`` to a ``(p0, p1)`` pixel-coordinate pair for ``timecode``.
+
+    ``finish_line`` may be either a fixed ``[p0, p1]`` pair, or a dict of
+    timecode-string -> ``[p0, p1]`` waypoints (e.g. to track a panning camera
+    that's moved to a new fixed position part way through a race). This is a
+    step function, not an interpolation: the line holds at the most recent
+    waypoint at or before ``timecode``, and at the earliest waypoint for any
+    time before it. Points may be int pixel coordinates or float coordinates
+    in [0, 1], normalized to (frame_width, frame_height).
+    """
+    raw = race_config['finish_line']
+    if not isinstance(raw, dict):
+        return (_resolve_point(raw[0], frame_width, frame_height),
+                _resolve_point(raw[1], frame_width, frame_height))
+
+    def _waypoint_frames(k):
+        t = k if isinstance(k, Timecode) else Timecode(timecode.framerate, k)
+        return t.frames
+
+    waypoints = sorted(
+        ((_waypoint_frames(k), v) for k, v in raw.items()),
+        key=lambda entry: entry[0])
+    cur = timecode.frames
+    active = waypoints[0][1]
+    for f, v in waypoints:
+        if f > cur:
+            break
+        active = v
+    return (_resolve_point(active[0], frame_width, frame_height),
+            _resolve_point(active[1], frame_width, frame_height))
